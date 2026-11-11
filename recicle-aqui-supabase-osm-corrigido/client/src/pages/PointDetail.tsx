@@ -1,0 +1,268 @@
+import { ArrowLeft, Clock, MapPin, Package, Send } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link, useRoute } from "wouter";
+import QueryError from "@/components/QueryError";
+import AppShell, { useCommunitySession } from "@/components/AppShell";
+import CollectionPointsMap from "@/components/CollectionPointsMap";
+import StatusBadge from "@/components/StatusBadge";
+import { formatDate, pointImage } from "@/lib/domain";
+import { trpc } from "@/lib/trpc";
+import { startLogin } from "@/const";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+
+export default function PointDetail() {
+  const [, params] = useRoute("/pontos/:id");
+  const pointId = Number(params?.id);
+  const input = useMemo(() => ({ id: pointId }), [pointId]);
+  const point = trpc.points.byId.useQuery(input, {
+    enabled: Number.isInteger(pointId) && pointId > 0,
+  });
+  const messages = trpc.messages.list.useQuery(
+    { pointId },
+    { enabled: point.data?.approvalStatus === "aprovado" }
+  );
+  const session = useCommunitySession();
+  const utils = trpc.useUtils();
+  const [content, setContent] = useState("");
+  const send = trpc.messages.create.useMutation({
+    onSuccess: () => {
+      setContent("");
+      utils.messages.list.invalidate({ pointId });
+      utils.dashboard.mine.invalidate();
+    },
+  });
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (content.trim()) send.mutate({ pointId, content: content.trim() });
+  };
+  if (point.isLoading)
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-7xl px-6 py-12">
+          <div className="h-96 animate-pulse rounded-2xl bg-muted" />
+        </div>
+      </AppShell>
+    );
+  if (point.isError && point.error.data?.code !== "NOT_FOUND")
+    return (
+      <AppShell>
+        <QueryError
+          title="Não foi possível carregar este ponto"
+          retry={() => void point.refetch()}
+        />
+      </AppShell>
+    );
+  if (!point.data)
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-7xl px-6 py-20 text-center">
+          <h1 className="text-2xl font-bold">Ponto não encontrado</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Ele pode não estar aprovado ou ter sido removido.
+          </p>
+          <Link href="/pontos" className="btn-primary mt-6">
+            Voltar à lista
+          </Link>
+        </div>
+      </AppShell>
+    );
+  const data = point.data;
+  if (data.approvalStatus !== "aprovado")
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-3xl px-6 py-12">
+          <h1 className="text-3xl font-bold">{data.name}</h1>
+          <p className="mt-3 text-muted-foreground">
+            {data.approvalStatus === "pendente"
+              ? "Seu ponto aguarda aprovação e ainda não aparece no mapa público."
+              : "Este ponto não foi aprovado."}
+          </p>
+          <p className="mt-6">
+            {data.address} · {data.neighborhood}
+          </p>
+          <p className="mt-3">{data.description}</p>
+          <Link href="/dashboard" className="btn-outline mt-6">
+            Voltar ao painel
+          </Link>
+        </div>
+      </AppShell>
+    );
+
+  return (
+    <AppShell>
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <Link
+          href="/pontos"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" /> Voltar
+        </Link>
+        <div className="mt-4 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+          <div>
+            <div className="card-soft overflow-hidden">
+              <div className="aspect-[16/9] bg-muted">
+                <img
+                  src={pointImage(data)}
+                  alt={data.name}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <div className="p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h1 className="text-2xl font-bold">{data.name}</h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {data.neighborhood} · {data.address}
+                    </p>
+                  </div>
+                  <StatusBadge status={data.capacityStatus} />
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-foreground/80">
+                  {data.description}
+                </p>
+                <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                  <Info
+                    icon={Clock}
+                    label="Horário de coleta"
+                    value={data.openingHours}
+                  />
+                  <Info
+                    icon={Package}
+                    label="Quantidade estimada"
+                    value={data.estimatedVolume}
+                  />
+                  <Info
+                    icon={MapPin}
+                    label="Localização"
+                    value={`${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)}`}
+                  />
+                  <Info
+                    icon={Package}
+                    label="Materiais aceitos"
+                    value={data.materials.join(", ")}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="card-soft mt-6 h-[360px] overflow-hidden p-2">
+              <CollectionPointsMap points={[data]} selectedId={data.id} />
+            </div>
+          </div>
+          <section className="card-soft flex h-[calc(100vh-8rem)] min-h-[540px] flex-col overflow-hidden lg:sticky lg:top-20">
+            <div className="border-b border-border p-4">
+              <h2 className="font-semibold">Chat comunitário</h2>
+              <p className="text-xs text-muted-foreground">
+                Grupo do bairro {data.neighborhood}
+              </p>
+            </div>
+            <div className="flex-1 space-y-4 overflow-y-auto bg-secondary/40 p-4">
+              {messages.isLoading ? (
+                <p className="text-center text-sm text-muted-foreground">
+                  Carregando mensagens…
+                </p>
+              ) : messages.isError ? (
+                <QueryError
+                  compact
+                  title="Não foi possível carregar as mensagens"
+                  retry={() => void messages.refetch()}
+                />
+              ) : messages.data?.length ? (
+                messages.data.map(message => (
+                  <div key={message.id} className="flex gap-3">
+                    <Avatar className="h-9 w-9">
+                      <AvatarImage
+                        src={message.authorAvatarUrl ?? undefined}
+                        alt={message.authorName ?? "Membro"}
+                      />
+                      <AvatarFallback className="bg-primary/20 text-xs font-bold text-primary-dark">
+                        {message.authorName?.[0]?.toUpperCase() ?? "R"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <div className="text-xs text-muted-foreground">
+                        <b className="text-foreground">
+                          {message.authorName ?? "Membro"}
+                        </b>{" "}
+                        · {message.authorRole} · {formatDate(message.createdAt)}
+                      </div>
+                      <div className="mt-1 inline-block max-w-md break-words rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-sm">
+                        {message.content}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="pt-10 text-center text-sm text-muted-foreground">
+                  Seja a primeira pessoa a conversar neste ponto.
+                </p>
+              )}
+            </div>
+            {session.isAuthenticated ? (
+              <form
+                onSubmit={submit}
+                className="flex items-center gap-2 border-t border-border p-3"
+              >
+                <input
+                  value={content}
+                  onChange={event => setContent(event.target.value)}
+                  maxLength={1000}
+                  aria-label="Mensagem"
+                  placeholder="Digite uma mensagem..."
+                  className="min-w-0 flex-1 rounded-full bg-muted/60 px-4 py-2.5 text-sm outline-none focus:bg-background focus:ring-2 focus:ring-ring/40"
+                />
+                <button
+                  type="submit"
+                  className="btn-primary !rounded-full !p-3"
+                  disabled={send.isPending}
+                  aria-label="Enviar mensagem"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </form>
+            ) : (
+              <div className="border-t border-border p-4 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Entre para participar da conversa.
+                </p>
+                <button
+                  className="btn-primary mt-3"
+                  onClick={() => startLogin()}
+                >
+                  Entrar para conversar
+                </button>
+              </div>
+            )}
+            {send.isError && (
+              <p className="px-4 pb-3 text-xs text-[color:var(--danger)]">
+                {send.error.message}
+              </p>
+            )}
+          </section>
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+
+function Info({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Clock;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-border p-3">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="text-sm font-medium">{value}</div>
+      </div>
+    </div>
+  );
+}

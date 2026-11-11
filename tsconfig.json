@@ -1,0 +1,5 @@
+{
+  "extends": "./recicle-aqui-supabase-osm-corrigido/tsconfig.json",
+  "include": ["App.tsx", "recicle-aqui-supabase-osm-corrigido/client/src/**/*", "recicle-aqui-supabase-osm-corrigido/shared/**/*", "recicle-aqui-supabase-osm-corrigido/server/**/*"],
+  "exclude": ["**/node_modules", "**/dist", "**/*.test.ts"]
+}
